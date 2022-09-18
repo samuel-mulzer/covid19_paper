@@ -1,0 +1,206 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+    \subsection*{Normalisierung des SIR-Modells}
+    \label{ap:normalization}
+    Nach Ableitung mit der Quotientenregel ergibt sich mit $N' = 0$ allgemein:
+    \begin{equation*}
+        x' = \left(\frac{X}{N}\right)' = \frac{X'N-N'X}{N^2} = \frac{X'N}{N^2} = \frac{X'}{N}
+    \end{equation*}
+    und entsprechend:
+    \begin{equation*}
+        \begin{aligned}
+            s' &= \frac{S'}{N}, & i' &= \frac{I'}{N}, & r' &= \frac{R'}{N}
+        \end{aligned}
+    \end{equation*}
+    In diese Ausdrücke kann nun jeweils die rechte Seite aus System \eqref{eq:sir} eingesetzt werden und wir erhalten: 
+    \begin{equation*}
+        \setlength{\jot}{0.5cm}
+        \begin{aligned}
+            s' &= \frac{-\frac{\beta}{N}SI}{N} = \frac{\beta SI}{N^2} = -\beta\frac{S}{N}\frac{I}{N} = -\beta si, \\
+            i' &= \frac{-\frac{\beta}{N}SI-\gamma I}{N} = \frac{\beta SI}{N^2} - \frac{\gamma I}{N} = \beta\frac{S}{N}\frac{I}{N} -\gamma\frac{I}{N} = \beta si - \gamma i, \\
+            r' &= \frac{\gamma I}{N} = \gamma\frac{I}{N} = \gamma i
+        \end{aligned}
+    \end{equation*}
+    Nachdem die Brüche nun wieder durch die Anteile aus \eqref{eq:proportions} ersetzt wurden, erhalten wir System \eqref{eq:sir_norm}.
+    
+    
+    \subsection*{Software zur Simulation der Modelle}
+    \label{ap:simulation}
+    Im Rahmen der Arbeit wurde Software entwickelt, mit der  die verwendeten Modelle simuliert wurden. Diese ist in Python geschrieben und kann in einer mit Cython optimierten Variante abgerufen werden: \url{https://github.com/samuel-mulzer/covid19_model}
+    Im Folgenden finden sich vereinfachte Versionen der einzelnen Bestandteile:
+
+\begin{lstlisting}[title=Importierung der verwendeten Programmbibliotheken:]
+from math import sin, pi
+import numpy as np
+import matplotlib.pyplot as plt
+\end{lstlisting}
+
+\begin{lstlisting}[title=Definition der Differentialgleichungssysteme der verwendeten Modelle:]
+# SIR model
+def sir(x, t, beta, gamma):
+    s,i,r = x
+
+    dsdt = - beta * s * i
+    didt = + beta * s * i - gamma * i
+    drdt = + gamma * i
+
+    return np.array([dsdt, didt, drdt])
+
+# SIRS model with vaccination and seasonality
+def sirs_vs(x, t, beta, gamma, alpha, zeta, xi):
+    s,i,r = x
+
+    _lambda = beta * (1 + xi * sin(pi*t/180))
+    _eta    = zeta if s > zeta else s
+
+    dsdt = - _lambda * s * i - _eta + alpha * r
+    didt = + _lambda * s * i - gamma * i
+    drdt = + gamma * i + _eta - alpha * r 
+
+    return np.array([dsdt, didt, drdt])
+\end{lstlisting}
+
+\begin{lstlisting}[title=Lösung des Systems mit dem Euler-Verfahren:]
+def solve(model, x0, tspan, h, args):
+    solution = np.empty(shape=(len(tspan), len(x0)))
+    c = 0
+    solution[c] = x0
+    x = x0
+    
+    for t in tspan[1:]:
+        c += 1
+        dx = model(x, t, *args) * h
+        x += dx
+        solution[c] = x
+
+    return solution.transpose()
+\end{lstlisting}
+
+\begin{lstlisting}[title=Visualisierung:]
+def visualize(solution, n, tspan, args, labels, save):
+    t_0, t_max = tspan[0], tspan[-1]
+    beta, gamma = args[0], args[1]
+
+    fig = plt.figure(figsize=(12,4), constrained_layout=True)
+    spec = fig.add_gridspec(2,2, width_ratios=[2,1], height_ratios=[3,2])
+
+    ax1 = fig.add_subplot(spec[0, 0])
+    ax2 = fig.add_subplot(spec[1, 0])
+    ax3 = fig.add_subplot(spec[:, 1])
+
+    c = 0
+    for x in solution:
+        ax1.plot(tspan, x, '-', label=labels[c])
+        c += 1
+    ax1.legend(loc='center right')
+    ax1.set_xlim(t_0, t_max)
+    ax1.set_ylim(0, 1)
+
+    reprod = beta/gamma*solution[0]
+    ax2.plot(tspan, reprod, 'k', label=r"$R_e$")
+    ax2.plot([t_0, t_max], [1,1], 'k:')
+    ax2.legend()
+    ax2.set_xlim(t_0, t_max)
+
+    ax3.plot(solution[0], solution[1], 'k')
+    ax3.set_xlim(0, None)
+    ax3.set_ylim(0, None)
+
+    plt.show()
+\end{lstlisting}
+
+\begin{lstlisting}[title=Simulation des Standardszenarios des erweiterten Modells:]
+t = 0
+d = 1000
+h = 1
+tspan = np.arange(t, t+d, h)
+
+s0, i0, r0 = 0.308, 0.007, 0.685
+n = 83e6
+x0 = np.array([s0, i0, r0])
+labels = ["S", "I", "R"]
+
+beta = 0.95
+gamma = 1/10
+alpha = 1/90
+zeta = 0.0015
+xi = 0.46
+args = (beta, gamma, alpha, zeta, xi)
+
+solution = solve(sirs_vs, x0, tspan, h, args)
+visualize(solution, n, tspan, args, labels)
+
+index_i_max = solution[1].argmax()
+i_max = solution[1][index_i_max]
+print(f"i_max={i_max:.2g}, I_max={i_max*n:.3g} | t={tspan[index_i_max]}")
+\end{lstlisting}
+
+
+
+    \subsection*{Software zur Auswertung der Datensätze}
+    \label{ap:evaluation}
+    Die Auswertung der Datensätze erfolgt ebenfalls in Python und ist in Form eines Jupyter Notebooks Teil des zuvor erwähnten Softwareprojekts.
+
+\begin{lstlisting}[title=Importierung der verwendeten Programmbibliotheken:]
+import pandas as pd
+import statistics as st
+\end{lstlisting}
+
+\begin{lstlisting}[title=Definition von Konstanten:]
+p = 83e6    # Bevölkerung Deutschlands
+d1 = 10     # Dauer der Infektiosität
+d2 = 180    # Dauer der Immunität
+\end{lstlisting}
+
+\begin{lstlisting}[title=Laden der Datensätze:]
+# Neuinfektionen
+df1 = pd.read_csv("https://raw.githubusercontent.com/robert-koch-institut/SARS-CoV-2-Nowcasting_und_-R-Schaetzung/main/Nowcast_R_aktuell.csv")
+df1 = df1[["Datum", "PS_COVID_Faelle_ma4"]]
+df1.rename(inplace=True, columns={"Datum": "date", "PS_COVID_Faelle_ma4": "cases"})
+
+# Impfungen
+df2 = pd.read_csv("https://impfdashboard.de/static/data/germany_vaccinations_timeseries_v3.tsv", sep="\t")
+df2 = df2[["date", "impfungen","impfquote_boost1"]]
+df2.rename(inplace=True, columns={"date": "date", "impfungen": "vaccinations", "impfquote_boost1": "boost"})
+
+# Intensivbelegung
+df3 = pd.read_csv("https://diviexchange.blob.core.windows.net/%24web/zeitreihe-deutschland.csv")
+df3 = df3.loc[df3["Behandlungsgruppe"] == "ERWACHSENE"]
+df3 = df3[["Datum", "Aktuelle_COVID_Faelle_ITS", "Belegte_Intensivbetten", "Freie_Intensivbetten"]]
+df3.rename(inplace=True, columns={"Datum":"date","Aktuelle_COVID_Faelle_ITS":"covid","Belegte_Intensivbetten":"occupied","Freie_Intensivbetten":"free"})
+df3.reset_index(drop=True, inplace=True)
+\end{lstlisting}
+
+\begin{lstlisting}[title=Bestimmung des Anfangszustands:]
+t0 = df1.loc[df1["date"] == "2022-09-30"].index[0]
+i = sum(df1["cases"][t0-d1:])       # infected
+r1 = sum(df1["cases"][t0-d2:t0-d1]) # recovered
+t0 = df2.loc[df2["date"] == "2022-09-30"].index[0]
+r2 = df2["boost"].iloc[t0]          # boosted
+
+i *= 2/p
+r = r1/p + r2
+s = 1 - i - r
+
+print(s, i, r)
+\end{lstlisting}
+
+\begin{lstlisting}[title=Bestimmung der Impfrate:]
+# Durschnittliche tägliche Impfungen 2022
+t0 = df2.loc[df2["date"] == "2022-01-01"].index[0]
+t1 = df2.loc[df2["date"] == "2022-09-30"].index[0]
+v = st.mean(df2["vaccinations"][t0:t1])
+print(v)
+\end{lstlisting}
+
+\begin{lstlisting}[title=Bestimmung der Kapazität des Gesundheitssystems:]
+# Maximale Anzahl von auf der Intensivstation behandelten Covid-19 Patienten
+index_icu_max = df3["covid"].idxmax()
+icu_max = df3["covid"].iloc[index_icu_max]
+# Maximale Anzahl von Covid-19 Infizierten
+i_max = icu_max / 0.003 / 0.13
+print(icu_max, i_max)
+\end{lstlisting}
+
+\end{document}
